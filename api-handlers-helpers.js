@@ -1,25 +1,28 @@
 const { spawn } = require("child_process");
 const path = require("path");
 
-/**
- * Ejecuta fast-cli SIN npx (binario local) y corta < 60s para evitar 502 del proxy.
- * Devuelve { status, data } siempre (200/500/504).
- */
-exports.getExecOutput = (args = ["-u", "--json"], opts = {}) =>
+exports.getExecOutput = (args = [], opts = {}) =>
   new Promise((resolve) => {
-    const timeoutMs = opts.timeoutMs ?? 55_000; // < 60s
+    // ⬇️ 45s máximo: deja margen al proxy de Render
+    const timeoutMs = opts.timeoutMs ?? 45_000;
+
+    // Usa el binario local (sin npx)
     const fastCli = path.resolve(__dirname, "node_modules", "fast-cli", "cli.js");
+
+    // ⬅️ claves: --upload --json --timeout=30
+    const finalArgs = ["--upload", "--json", "--timeout=30", ...args];
 
     let stdout = "", stderr = "", timedOut = false;
 
-    const child = spawn(process.execPath, [fastCli, ...args], {
-      env: process.env
+    const child = spawn(process.execPath, [fastCli, ...finalArgs], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
     const timer = setTimeout(() => {
       timedOut = true;
       try { child.kill("SIGKILL"); } catch {}
-      resolve({ status: 504, data: "timeout: fast-cli tardó demasiado" });
+      resolve({ status: 504, data: "timeout: fast-cli > 45s" });
     }, timeoutMs);
 
     child.stdout.on("data", (c) => (stdout += c.toString()));
