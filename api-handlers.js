@@ -1,32 +1,40 @@
+// api-handlers.js
 const os = require("os");
-const { runCommand } = require("./api-handlers-helpers");
+const speedTest = require("speedtest-net");
 
-function safeParse(x) {
-  try { return JSON.parse(x); } catch { return null; }
+function mbps(bytesPerSec) {
+  // bytes/s -> Mbps
+  return (bytesPerSec * 8) / 1e6;
 }
 
 exports.testSpeedHandler = async () => {
-  // Llamamos al binario local, evitando “npx” (que aumenta consumo)
-  const cmd = process.platform === "win32"
-    ? ".\\node_modules\\.bin\\fast.cmd"
-    : "./node_modules/.bin/fast";
+  try {
+    const result = await speedTest({
+      acceptLicense: true,
+      acceptGdpr: true,
+      // duraciones cortas para plan Free
+      downloadDuration: 6,
+      uploadDuration: 6,
+    });
 
-  const out = await runCommand(cmd, ["--upload", "--json"], {
-    timeoutMs: 60_000,
-    maxBytes: 256 * 1024,
-  });
+    const download = mbps(result.download?.bandwidth || 0);
+    const upload   = mbps(result.upload?.bandwidth || 0);
+    const ping     = result.ping?.latency ?? null;
 
-  if (typeof out.data === "string" && out.data.includes("Please check your internet connection")) {
-    return { status: 400, data: { error: "Sin conexión a Internet" } };
+    return {
+      status: 200,
+      data: {
+        downloadSpeed: Number(download.toFixed(2)), // Mbps
+        uploadSpeed:   Number(upload.toFixed(2)),   // Mbps
+        latency:       ping,                        // ms
+        isp:           result.isp || null,
+        serverName:    result.server?.name || null,
+        interface:     result.interface?.name || null,
+        server:        os.hostname(),
+        os:            process.platform
+      }
+    };
+  } catch (e) {
+    return { status: 400, data: { error: String(e?.message || e) } };
   }
-  if (out.status !== 200) {
-    return { status: 400, data: { error: String(out.data || "falló fast-cli") } };
-  }
-
-  const parsed = safeParse(out.data);
-  if (!parsed) {
-    return { status: 400, data: { error: "Salida no JSON de fast-cli", raw: out.data } };
-  }
-
-  return { status: 200, data: { ...parsed, server: os.hostname(), os: process.platform } };
 };
